@@ -249,3 +249,277 @@ class App(ctk.CTk):
             slider.bind("<ButtonRelease-1>", cmd_rel)
             
             return slider
+ # Create adjustment sliders
+        self.s_br = make_slider(col2, "Brightness", -100, 100, 0, self.on_br_change, self.on_release, show_reset=True)
+        self.s_ct = make_slider(col2, "Contrast", 0.5, 2.0, 1.0, self.on_ct_change, self.on_release, show_reset=True)
+        self.s_bl = make_slider(col2, "Blur", 0, 20, 0, self.on_bl_change, self.on_release, show_reset=True)
+        self.s_sz = make_slider(col2, "Resize", 0.1, 3.0, 1.0, self.on_sz_change, self.on_release, show_reset=True)
+
+        # Right column - Transformations
+        col3 = ctk.CTkFrame(control_frame, fg_color="transparent")
+        col3.pack(side="right", fill="y", padx=20, pady=20)
+        
+        # Transformations section
+        ctk.CTkLabel(col3, text="TRANSFORM", font=("Arial", 12, "bold")).pack(anchor="w", pady=(0,5))
+        
+        # Button row
+        row = ctk.CTkFrame(col3, fg_color="transparent")
+        row.pack(pady=5)
+        ctk.CTkButton(row, text="90°", width=60, command=lambda: self.rotate(90)).pack(side="left", padx=2)
+        ctk.CTkButton(row, text="Flip H", width=60, command=self.flip_h).pack(side="left", padx=2)
+        ctk.CTkButton(row, text="Flip V", width=60, command=self.flip_v).pack(side="left", padx=2)
+
+    def refresh(self):
+        """Update display and status information."""
+        # Skip if no image loaded
+        if self.model.current_img is None: 
+            return
+        
+        # Update canvas with current image
+        self.image_area.update_image(self.model.current_img)
+        
+        # Get image dimensions
+        h, w = self.model.current_img.shape[:2]
+        
+        # Format modified indicator
+        mod_mark = "*" if self.model.is_modified else ""
+        
+        # Get filename for display
+        file_name = os.path.basename(self.model.img_path) if self.model.img_path else "Untitled"
+        
+        # Update status bar with file info and image stats
+        self.status_label.configure(
+            text=f"File: {file_name}{mod_mark}  |  Resolution: {w} x {h} px  |  Zoom: {self.model.scale:.1f}x"
+        )
+        
+        # Update window title
+        self.title(f"Assignment 3 - {file_name}{mod_mark}")
+
+    def sync_sliders(self):
+        """Synchronize slider positions with model values."""
+        # Update slider positions
+        self.s_br.set(self.model.brightness)
+        self.s_ct.set(self.model.contrast)
+        self.s_bl.set(self.model.blur)
+        self.s_sz.set(self.model.scale)
+        
+        # Update slider labels
+        self.slider_labels["Brightness"].configure(text=f"Brightness: {self.model.brightness}")
+        self.slider_labels["Contrast"].configure(text=f"Contrast: {self.model.contrast:.2f}")
+        self.slider_labels["Blur"].configure(text=f"Blur: {self.model.blur}")
+        self.slider_labels["Resize"].configure(text=f"Resize: {self.model.scale:.2f}")
+
+    def on_resize(self, event):
+        """Handle window resize event."""
+        pass
+    
+    def confirm_exit(self):
+        """Ask user to save before exiting if there are unsaved changes."""
+        # Check for unsaved changes
+        if self.model.is_modified and self.model.current_img is not None:
+            # Ask user about saving
+            answer = messagebox.askyesnocancel(
+                "Unsaved Changes", 
+                "You have unsaved changes. Do you want to save before exiting?"
+            )
+            
+            # Handle user response
+            if answer is True:
+                # Save and exit if successful
+                if self.save(): 
+                    self.quit()
+            elif answer is False:
+                # Exit without saving
+                self.quit()
+        else:
+            # Ask confirmation if no changes
+            if messagebox.askyesno("Confirm Exit", "Are you sure you want to exit?"):
+                self.quit()
+
+    def open_image(self):
+        """Open image file dialog and load image."""
+        # Check for unsaved changes
+        if self.model.is_modified and self.model.current_img is not None:
+            # Ask about saving
+            answer = messagebox.askyesnocancel(
+                "Unsaved Changes", 
+                "You have unsaved changes. Save before opening new image?"
+            )
+            
+            # Handle user response
+            if answer is True:
+                # Cancel if save failed
+                if not self.save(): 
+                    return 
+            elif answer is None:
+                # Cancel operation
+                return
+
+        # Show file dialog
+        p = filedialog.askopenfilename(filetypes=[("Images", "*.jpg *.png *.bmp")])
+        
+        # Load image if selected
+        if p:
+            try:
+                # Load image
+                self.model.open_image(p)
+                
+                # Update UI
+                self.sync_sliders()
+                self.refresh()
+            except ValueError:
+                # Handle corrupted files
+                messagebox.showerror("Error", "Could not load image. The file might be corrupted or unsupported.")
+            except Exception as e:
+                # Handle other errors
+                messagebox.showerror("Error", f"An unexpected error occurred: {e}")
+    
+    def save(self):
+        """Save image to current file path."""
+        # Check if image exists
+        if self.model.current_img is None:
+            messagebox.showwarning("Warning", "No image loaded to save!")
+            return False
+
+        # Save to existing path
+        if self.model.img_path:
+            try:
+                # Write image
+                cv2.imwrite(self.model.img_path, self.model.current_img)
+                
+                # Update state
+                self.model.is_modified = False
+                
+                # Update display
+                self.refresh()
+                
+                # Show success message
+                messagebox.showinfo("Success", "Image saved successfully!")
+                return True
+            except Exception as e:
+                # Handle save error
+                messagebox.showerror("Error", f"Could not save image: {e}")
+                return False
+        else:
+            # No path set, use Save As
+            return self.save_as()
+            
+    def save_as(self):
+        """Save image to new file path."""
+        # Check if image exists
+        if self.model.current_img is None:
+            messagebox.showwarning("Warning", "No image loaded to save!")
+            return False
+            
+        # Show save dialog
+        p = filedialog.asksaveasfilename(
+            defaultextension=".jpg", 
+            filetypes=[("JPEG", "*.jpg"), ("PNG", "*.png"), ("BMP", "*.bmp")]
+        )
+        
+        # Save if path selected
+        if p:
+            try:
+                # Write image
+                cv2.imwrite(p, self.model.current_img)
+                
+                # Update path and state
+                self.model.img_path = p
+                self.model.is_modified = False
+                
+                # Update display
+                self.refresh()
+                
+                # Show success message
+                messagebox.showinfo("Success", "Image saved successfully!")
+                return True
+            except Exception as e:
+                # Handle save error
+                messagebox.showerror("Error", f"Could not save image: {e}")
+                return False
+        
+        return False
+
+    def undo(self):
+        """Undo last action."""
+        # Execute undo and refresh if successful
+        if self.model.undo(): 
+            self.sync_sliders()
+            self.refresh()
+    
+    def redo(self):
+        """Redo last undone action."""
+        # Execute redo and refresh if successful
+        if self.model.redo(): 
+            self.sync_sliders()
+            self.refresh()
+
+    def grayscale(self):
+        """Apply grayscale effect."""
+        # Apply and refresh
+        self.model.grayscale()
+        self.refresh()
+    
+    def edge(self):
+        """Apply edge detection effect."""
+        # Apply and refresh
+        self.model.edge()
+        self.refresh()
+    
+    def rotate(self, a):
+        """Rotate image by angle."""
+        # Apply and refresh
+        self.model.rotate(a)
+        self.refresh()
+    
+    def flip_h(self):
+        """Flip image horizontally."""
+        # Apply and refresh
+        self.model.flip_h()
+        self.refresh()
+    
+    def flip_v(self):
+        """Flip image vertically."""
+        # Apply and refresh
+        self.model.flip_v()
+        self.refresh()
+
+    def on_release(self, e):
+        """Handle slider release event."""
+        # Push undo state after slider adjustment
+        self.model.push_undo()
+    
+    def on_br_change(self, v):
+        """Handle brightness slider change."""
+        # Update brightness and refresh
+        self.model.brightness = int(v)
+        self.model.apply_all()
+        self.refresh()
+    
+    def on_ct_change(self, v):
+        """Handle contrast slider change."""
+        # Update contrast and refresh
+        self.model.contrast = float(v)
+        self.model.apply_all()
+        self.refresh()
+    
+    def on_bl_change(self, v):
+        """Handle blur slider change."""
+        # Update blur and refresh
+        self.model.blur = int(v)
+        self.model.apply_all()
+        self.refresh()
+    
+    def on_sz_change(self, v):
+        """Handle resize slider change."""
+        # Update scale and refresh
+        self.model.scale = float(v)
+        self.model.apply_all()
+        self.refresh()
+
+
+if __name__ == "__main__":
+    # Create and run application
+    app = App()
+    app.mainloop()
+
